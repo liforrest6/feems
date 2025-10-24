@@ -22,7 +22,7 @@ from .objective import Objective, loss_wrapper, neg_log_lik_w0_s2, comp_mats, in
 from .utils import cov_to_dist, dist_to_cov, benjamini_hochberg, parametric_bootstrap
 
 class SpatialGraph(nx.Graph):
-    def __init__(self, genotypes, sample_pos, node_pos, edges, scale_snps=True):
+    def __init__(self, genotypes, sample_pos, node_pos, edges, scale_snps=True, downsample = 0):
         """Represents the spatial network which the data is defined on and
         stores relevant matrices / performs linear algebra routines needed for
         the model and optimization. Inherits from the networkx Graph object.
@@ -36,6 +36,8 @@ class SpatialGraph(nx.Graph):
         Optional:
             scale_snps (:obj:`Bool`): boolean to scale SNPs by SNP specific
                 Binomial variance estimates
+            downsample (:obj:`int`): integer of maximum samples per node to sample from, 
+                default 0 if not downsampling
         """
         # check inputs
         assert len(genotypes.shape) == 2
@@ -79,6 +81,10 @@ class SpatialGraph(nx.Graph):
 
         # vectorization operator on the edges
         self.diag_oper = self._create_vect_matrix()
+
+        ## global objects for downsampling
+        self.downsample = downsample
+        self.remove_idx = []
 
         print("Assigning samples to nodes", end="...")
         self._assign_samples_to_nodes(sample_pos, node_pos)  # assn samples
@@ -199,9 +205,16 @@ class SpatialGraph(nx.Graph):
         for i in range(n_samples):
             dist = (sample_pos[i, :] - node_pos) ** 2
             idx = np.argmin(np.sum(dist, axis=1))
+
             assned_node_idx[i] = idx
             self.nodes[idx]["n_samples"] += 1
             self.nodes[idx]["sample_idx"].append(i)
+
+            ## change to downsample if num nodes is greater than downsample
+            if self.downsample and self.nodes[idx]['n_samples'] > self.downsample:
+                self.nodes[idx]["sample_idx"] = random.sample(self.nodes[idx]['sample_idx'], self.downsample)
+                self.nodes[idx]["n_samples"] = self.downsample
+        
         n_samples_per_node = query_node_attributes(self, "n_samples")
         self.n_observed_nodes = np.sum(n_samples_per_node != 0)
         self.assned_node_idx = assned_node_idx
